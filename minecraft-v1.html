@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-height, initial-scale=1.0">
+    <title>Rinn's MineCraft</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 10px;
+            font-family: Arial, sans-serif;
+            z-index: 10;
+        }
+        .hotbar {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            justify-content: center;
+        }
+        .hotbar div {
+            width: 40px;
+            height: 40px;
+            margin: 0 5px;
+            border: 1px solid white;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: transform 0.2s;
+        }
+        .hotbar div:hover {
+            transform: scale(1.1);
+        }
+        .selected {
+            border: 2px solid yellow;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h3>Rinn's Experimental Voxel Minecraft Game</h3>
+        <p>Press 1 ~ 7 to select a block type</p>
+        <p>Right click to place or Left Click break a block!</p>
+        <p>Feel free to edit.</p>
+        <p>Bugs Reported: (Stop Going Foward Auto: Click "W Key") (Turn on Gravity: Click "f key")
+        <p>Made with Babylon.js, By Rinn and JS, CSS by CHATGPT</p>
+    </div>
+    <div class="hotbar">
+        <div id="grass" class="block" style="background-color: green;"></div>
+        <div id="dirt" class="block" style="background-color: brown;"></div>
+        <div id="wood" class="block" style="background-color: #8B4513;"></div>
+        <div id="stone" class="block" style="background-color: gray;"></div>
+        <div id="leaves" class="block" style="background-color: #228B22;"></div>
+        <div id="water" class="block" style="background-color: rgba(0, 0, 255, 0.5);"></div>
+        <div id="lava" class="block" style="background-color: orange;"></div>
+    </div>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script>
+        const canvas = document.createElement('canvas');
+        document.body.appendChild(canvas);
+        const engine = new BABYLON.Engine(canvas, true);
+        const chunkSize = 16; // Size of each chunk
+        const renderDistance = 1; // Load only 4 chunks
+        let chunks = new Map();
+
+        const createScene = function() {
+            const scene = new BABYLON.Scene(engine);
+            scene.clearColor = new BABYLON.Color3(0.5, 0.7, 1); // Light blue sky
+
+            const camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 1.8, -10), scene);
+            camera.setTarget(BABYLON.Vector3.Zero());
+            camera.attachControl(canvas, true);
+
+            const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+
+            // Block types
+            const blockMaterials = {
+                grass: new BABYLON.StandardMaterial("grass", scene),
+                dirt: new BABYLON.StandardMaterial("dirt", scene),
+                wood: new BABYLON.StandardMaterial("wood", scene),
+                stone: new BABYLON.StandardMaterial("stone", scene),
+                leaves: new BABYLON.StandardMaterial("leaves", scene),
+                water: new BABYLON.StandardMaterial("water", scene),
+                lava: new BABYLON.StandardMaterial("lava", scene)
+            };
+            blockMaterials.grass.diffuseTexture = new BABYLON.Texture("https://cdn.babylonjs.com/Assets/grass.jpg", scene);
+            blockMaterials.dirt.diffuseTexture = new BABYLON.Texture("https://cdn.babylonjs.com/Assets/dirt.jpg", scene);
+            blockMaterials.wood.diffuseTexture = new BABYLON.Texture("https://cdn.babylonjs.com/Assets/wood.jpg", scene);
+            blockMaterials.stone.diffuseTexture = new BABYLON.Texture("https://cdn.babylonjs.com/Assets/stone.jpg", scene);
+            blockMaterials.leaves.diffuseColor = new BABYLON.Color3(0.13, 0.55, 0.13); // Dark green leaves
+
+            // Water: transparent and allows passage
+            blockMaterials.water.diffuseColor = new BABYLON.Color3(0, 0, 1);
+            blockMaterials.water.alpha = 0.5;
+            blockMaterials.water.checkCollisions = false; // No collision with water
+
+            // Lava: bright and impassable
+            blockMaterials.lava.emissiveColor = new BABYLON.Color3(1, 0.4, 0); // Bright orange
+            blockMaterials.lava.diffuseColor = new BABYLON.Color3(1, 0.4, 0);
+            blockMaterials.lava.checkCollisions = true; // Enable collision with lava
+
+            // Create blocks
+            function createBlock(x, y, z, material, isPassable = false) {
+                const block = BABYLON.MeshBuilder.CreateBox("block", { size: 1 }, scene);
+                block.material = material;
+                block.position.set(x, y, z);
+                block.checkCollisions = !isPassable; // Enable or disable collisions based on the block type
+                return block;
+            }
+
+            // Create a chunk of blocks
+            function createChunk(chunkX, chunkZ) {
+                const chunk = new BABYLON.TransformNode(`chunk_${chunkX}_${chunkZ}`);
+                for (let x = 0; x < chunkSize; x++) {
+                    for (let z = 0; z < chunkSize; z++) {
+                        createBlock(chunkX * chunkSize + x, 0, chunkZ * chunkSize + z, blockMaterials.dirt);
+                        createBlock(chunkX * chunkSize + x, 1, chunkZ * chunkSize + z, blockMaterials.grass);
+                    }
+                }
+                // Generate trees every 5 chunks
+                if (chunkX % 5 === 0 && chunkZ % 5 === 0) {
+                    createTree(chunkX * chunkSize + chunkSize / 2, 1, chunkZ * chunkSize + chunkSize / 2);
+                }
+                chunks.set(`${chunkX}_${chunkZ}`, chunk);
+            }
+
+            // Create a tree with taller trunks
+            function createTree(x, y, z) {
+                for (let i = 0; i < 4; i++) { // 4 blocks tall trunk
+                    createBlock(x, y + i, z, blockMaterials.wood);
+                }
+                createBlock(x, y + 4, z, blockMaterials.leaves).scaling.set(2, 1, 2); // Leaves
+            }
+
+            // Unload a chunk
+            function unloadChunk(chunkX, chunkZ) {
+                const key = `${chunkX}_${chunkZ}`;
+                if (chunks.has(key)) {
+                    chunks.get(key).dispose(); // Dispose the chunk
+                    chunks.delete(key); // Remove from the map
+                }
+            }
+
+            // Load and unload chunks around the player
+            function updateChunks() {
+                const chunkX = Math.floor(camera.position.x / chunkSize);
+                const chunkZ = Math.floor(camera.position.z / chunkSize);
+
+                // Load chunks
+                for (let x = -renderDistance; x <= renderDistance; x++) {
+                    for (let z = -renderDistance; z <= renderDistance; z++) {
+                        const key = `${chunkX + x}_${chunkZ + z}`;
+                        if (!chunks.has(key)) {
+                            createChunk(chunkX + x, chunkZ + z);
+                        }
+                    }
+                }
+
+                // Unload chunks that are far away
+                chunks.forEach((chunk, key) => {
+                    const [cx, cz] = key.split('_').map(Number);
+                    if (Math.abs(cx - chunkX) > renderDistance || Math.abs(cz - chunkZ) > renderDistance) {
+                        unloadChunk(cx, cz);
+                    }
+                });
+            }
+
+            // Enable gravity and collisions
+            scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+            scene.collisionsEnabled = true;
+            camera.applyGravity = true;
+            camera.ellipsoid = new BABYLON.Vector3(0.5, 1.8, 0.5); // Adjusted for camera height
+
+            // Handle collisions and gravity
+            scene.onBeforeRenderObservable.add(() => {
+                if (camera.position.y < 0) {
+                    camera.position.y = 1.8; // Reset camera height
+                }
+                updateChunks(); // Load and unload chunks
+            });
+
+            // Block placement and breaking
+            canvas.addEventListener('mousedown', (event) => {
+                const pickResult = scene.pick(scene.pointerX, scene.pointerY);
+                if (pickResult.hit) {
+                    const position = pickResult.pickedPoint;
+                    if (event.button === 0) { // Left click to break block
+                        const blockToBreak = pickResult.pickedMesh;
+                        if (blockToBreak && blockToBreak.material !== blockMaterials.water && blockToBreak.material !== blockMaterials.lava) {
+                            blockToBreak.dispose(); // Break the block
+                        }
+                    } else if (event.button === 2) { // Right click to place block
+                        const distance = BABYLON.Vector3.Distance(camera.position, position);
+                        if (distance <= 10) { // Place within 10 blocks range
+                            createBlock(position.x, position.y + 1, position.z, blockMaterials[selectedBlockType]);
+                        }
+                    }
+                }
+            });
+
+            // Handle block selection via hotbar
+            let selectedBlockType = 'grass';
+            document.querySelectorAll('.block').forEach(block => {
+                block.addEventListener('click', () => {
+                    selectedBlockType = block.id;
+                    document.querySelectorAll('.block').forEach(b => b.classList.remove('selected'));
+                    block.classList.add('selected');
+                });
+            });
+
+            // Handle keyboard inputs for block selection
+            window.addEventListener('keydown', (event) => {
+                if (event.key === '1') {
+                    selectedBlockType = 'grass';
+                } else if (event.key === '2') {
+                    selectedBlockType = 'dirt';
+                } else if (event.key === '3') {
+                    selectedBlockType = 'wood';
+                } else if (event.key === '4') {
+                    selectedBlockType = 'stone';
+                } else if (event.key === '5') {
+                    selectedBlockType = 'leaves';
+                } else if (event.key === '6') {
+                    selectedBlockType = 'water';
+                } else if (event.key === '7') {
+                    selectedBlockType = 'lava';
+                }
+                document.querySelectorAll('.block').forEach(b => b.classList.remove('selected'));
+                if (selectedBlockType) {
+                    document.getElementById(selectedBlockType).classList.add('selected');
+                }
+            });
+
+            // Toggle gravity
+            let gravityEnabled = true;
+            window.addEventListener('keydown', (event) => {
+                if (event.key === 'f') {
+                    gravityEnabled = !gravityEnabled;
+                    scene.gravity = gravityEnabled ? new BABYLON.Vector3(0, -0.5, 0) : new BABYLON.Vector3(0, 0, 0);
+                }
+            });
+
+            // Movement controls
+            const movementSpeed = 0.1;
+            const keys = {};
+            window.addEventListener('keydown', (event) => {
+                keys[event.key] = true;
+            });
+            window.addEventListener('keyup', (event) => {
+                keys[event.key] = false;
+            });
+
+            scene.onBeforeRenderObservable.add(() => {
+                if (keys['w']) {
+                    camera.position.addInPlace(camera.getDirection(BABYLON.Axis.Z).scale(movementSpeed));
+                }
+                if (keys['s']) {
+                    camera.position.subtractInPlace(camera.getDirection(BABYLON.Axis.Z).scale(movementSpeed));
+                }
+                if (keys['a']) {
+                    camera.position.subtractInPlace(camera.getDirection(BABYLON.Axis.X).scale(movementSpeed));
+                }
+                if (keys['d']) {
+                    camera.position.addInPlace(camera.getDirection(BABYLON.Axis.X).scale(movementSpeed));
+                }
+                if (keys[' ']) {
+                    camera.position.y += movementSpeed; // Jump
+                }
+            });
+
+            return scene;
+        };
+
+        const scene = createScene();
+        engine.runRenderLoop(() => {
+            scene.render();
+        });
+
+        window.addEventListener("resize", function() {
+            engine.resize();
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // Lock pointer on click
+        canvas.addEventListener('click', () => {
+            canvas.requestPointerLock();
+        });
+
+        // Set initial canvas size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    </script>
+</body>
+Rinn //do not delete this word or world will self destruct
+</html>
